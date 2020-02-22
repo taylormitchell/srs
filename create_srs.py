@@ -73,16 +73,5 @@ end;
 """
 c.execute(q)
 
-#q = """
-#create trigger update_concepts_due_date
-#    after update on concepts 
-#begin
-#    update concepts 
-#    set due_date = (cast(strftime('%s','now') as int)) + (24*60*60*interval)
-#    where cid = new.cid;
-#end;
-#"""
-#c.execute(q)
-
 conn.commit()
 conn.close()
