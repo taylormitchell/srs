@@ -29,7 +29,10 @@ class SRS:
         for table_name in table_names:
             print(table_name)
             q = f"select * from {table_name}"
-            display(pd.read_sql(q, self.conn))
+            df = pd.read_sql(q, self.conn)
+            for col in df.columns[df.columns.str.contains('_(date|time)')]:
+                df[col] = pd.to_datetime(df[col], unit='s')
+            display(df)
             
     def start_session(self, date):
         questions = self._get_due_questions(date)
@@ -38,10 +41,10 @@ class SRS:
     def close(self):
         self.conn.close()
         
-    def _add_review(self, qid, cid, start_time, end_time, elapsed_time, passed):
+    def _add_review(self, qid, cid, start_time, end_time, elapsed, passed):
         self.c.execute(f"""
-        INSERT INTO REVIEWS (qid, cid, start_time, end_time, elapsed_time, passed)
-        VALUES ({qid}, {cid}, {start_time}, {end_time}, {elapsed_time}, {passed});
+        INSERT INTO REVIEWS (qid, cid, start_time, end_time, elapsed, passed)
+        VALUES ({qid}, {cid}, {start_time}, {end_time}, {elapsed}, {passed});
         """)
         self.conn.commit()
            
@@ -85,24 +88,24 @@ class SRS:
 class Question:
     def __init__(self, qid, cid, front, back, 
                  start_time=None, end_time=None, 
-                 elapsed_time=None, passed=None):
+                 elapsed=None, passed=None):
         self.qid = qid
         self.cid = cid
         self.front = front
         self.back = back
         self.start_time = start_time
         self.end_time = end_time
-        self.elapsed_time = elapsed_time
+        self.elapsed = elapsed
         self.passed = passed
         
     def start(self):
         self.start_time = datetime.now().timestamp()
-        print(self.front)
+        return self.front
         
     def end(self):
         self.end_time = datetime.now().timestamp()
-        self.elapsed_time = self.end_time - self.start_time
-        print(self.back)
+        self.elapsed = self.end_time - self.start_time
+        return self.back
         
     def yes(self): 
         self.passed = 1
@@ -111,35 +114,33 @@ class Question:
         self.passed = 0
         
     def dump(self):
-        vs = ['qid','cid','start_time','end_time','elapsed_time','passed']
+        vs = ['qid','cid','start_time','end_time','elapsed','passed']
         return {k:getattr(self,k) for k in vs}
 
 class Session:
-    def __init__(self, questions, srs):
+    def __init__(self, questions, srs, push_dist=5):
         self.srs = srs
         self.questions = questions
-        self.qiter = iter(questions)
-        self.q = next(self.qiter)
+        self.push_dist = push_dist
         
-    def start(self):
-        self.q.start()
+    def next(self):
+        front = self.questions[0].start()
+        print(front)
         
     def end(self):
-        self.q.end()
+        back = self.questions[0].end()
+        print(back)
         print('\nDid you get it?')
         
     def yes(self):
-        self.q.yes()
-        self._dump_question()
+        self.questions[0].yes()
+        self.srs._add_review(**self.questions[0].dump())
+        del self.questions[0]
             
     def no(self):
-        self.q.no()
-        self._dump_question()
+        self.questions[0].no()
+        self.srs._add_review(**self.questions[0].dump())
+        # Move the question back into the queue
+        i = min(len(self.questions)-1, self.push_dist)    
+        self.questions.insert(i, self.questions.pop(0))
             
-    def _dump_question(self):
-        # TODO: add failed cards back to the queue  
-        self.srs._add_review(**self.q.dump())
-        try:
-            self.q = next(self.qiter)
-        except StopIteration:
-            print('Done!')
